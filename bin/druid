@@ -1,0 +1,45 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Druid\Application;
+use Druid\Launcher;
+
+if (PHP_VERSION_ID < 80200) {
+    fwrite(STDERR, "druid requires PHP 8.2 or newer (running " . PHP_VERSION . ").\n");
+    exit(1);
+}
+
+$autoloaders = [];
+if (isset($GLOBALS['_composer_autoload_path'])) {
+    $autoloaders[] = $GLOBALS['_composer_autoload_path'];
+}
+// Standalone checkout or global install.
+$autoloaders[] = __DIR__ . '/../vendor/autoload.php';
+// Installed as a dependency: vendor/druid/druid/bin/druid.
+$autoloaders[] = __DIR__ . '/../../../autoload.php';
+
+$loaded = false;
+foreach ($autoloaders as $autoloader) {
+    if (is_file($autoloader)) {
+        require_once $autoloader;
+        $loaded = true;
+        break;
+    }
+}
+
+if (!$loaded) {
+    fwrite(STDERR, "Could not find the Composer autoloader. Run `composer install` first.\n");
+    exit(1);
+}
+
+$argv = $_SERVER['argv'] ?? [];
+
+$handoff = Launcher::handoffTarget($argv, getcwd() ?: '.', __FILE__);
+if ($handoff !== null) {
+    exit(Launcher::execute($handoff, $argv));
+}
+
+$application = new Application();
+exit($application->run(Application::inputFromArgv($argv)));

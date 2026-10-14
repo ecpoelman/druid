@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <title>Linkit</title>
+  <short_name>linkit</short_name>
+  <type>project_module</type>
+  <supported_branches>6.1.,7.0.</supported_branches>
+  <project_status>published</project_status>
+  <link>https://www.drupal.org/project/linkit</link>
+  <releases>
+    <release>
+      <name>linkit 7.0.2</name>
+      <version>7.0.2</version>
+      <status>published</status>
+      <date>1760000000</date>
+      <core_compatibility>^10.3 || ^11</core_compatibility>
+      <security covered="1">Covered by Drupal's security advisory policy</security>
+      <terms><term><name>Release type</name><value>Bug fixes</value></term></terms>
+    </release>
+    <release>
+      <name>linkit 7.0.1</name>
+      <version>7.0.1</version>
+      <status>published</status>
+      <date>1750000000</date>
+      <core_compatibility>^10.1 || ^11</core_compatibility>
+      <security covered="1">Covered by Drupal's security advisory policy</security>
+    </release>
+    <release>
+      <name>linkit 7.0.0-beta1</name>
+      <version>7.0.0-beta1</version>
+      <status>unpublished</status>
+      <core_compatibility>^10.1 || ^11</core_compatibility>
+    </release>
+    <release>
+      <name>linkit 6.1.8</name>
+      <version>6.1.8</version>
+      <status>published</status>
+      <date>1740000000</date>
+      <core_compatibility>^9.5 || ^10</core_compatibility>
+      <security covered="1">Covered by Drupal's security advisory policy</security>
+      <terms><term><name>Release type</name><value>Security update</value></term></terms>
+    </release>
+    <release>
+      <name>linkit 6.1.7</name>
+      <version>6.1.7</version>
+      <status>published</status>
+      <core_compatibility>^9.5 || ^10</core_compatibility>
+    </release>
+    <release>
+      <name>linkit 8.x-6.0</name>
+      <version>8.x-6.0</version>
+      <status>published</status>
+      <core_compatibility>^8.8 || ^9</core_compatibility>
+    </release>
+    <release>
+      <name>linkit 7.x-3.6</name>
+      <version>7.x-3.6</version>
+      <status>published</status>
+    </release>
+  </releases>
+</project>

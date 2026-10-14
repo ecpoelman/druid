@@ -1,0 +1,13 @@
+{
+    "main": "bin/druid",
+    "output": "druid.phar",
+    "directories": ["src"],
+    "finder": [
+        {
+            "in": "vendor",
+            "exclude": ["phpunit", "sebastian", "theseer", "phar-io", "myclabs", "nikic"]
+        }
+    ],
+    "compression": "GZ",
+    "compactors": ["KevinGH\\Box\\Compactor\\Php"]
+}
