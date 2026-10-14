@@ -38,10 +38,17 @@ Make sure Composer's global bin directory is on your `PATH` (`composer global co
 Like the Drush launcher, a global `druid` hands off to the project's own `vendor/bin/druid` when you run it inside a
 project that has one. Set `DRUID_NO_HANDOFF=1` to always use the global copy.
 
-### From a checkout (before the package is published)
+### From GitHub (before the package is on Packagist)
 
 ```bash
-git clone <repo> ~/druid && cd ~/druid && composer install
+composer config repositories.druid vcs git@github.com:ecpoelman/druid.git
+composer require --dev druid/druid:dev-main
+```
+
+Or from a checkout:
+
+```bash
+git clone git@github.com:ecpoelman/druid.git ~/druid && cd ~/druid && composer install
 ln -s ~/druid/bin/druid ~/.local/bin/druid     # or add ~/druid/bin to PATH
 ```
 
