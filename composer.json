@@ -4,7 +4,11 @@
     "type": "library",
     "license": "GPL-2.0-or-later",
     "keywords": ["drupal", "drush", "upgrade", "security", "composer", "cli"],
-    "homepage": "https://github.com/druid/druid",
+    "homepage": "https://github.com/ecpoelman/druid",
+    "support": {
+        "issues": "https://github.com/ecpoelman/druid/issues",
+        "source": "https://github.com/ecpoelman/druid"
+    },
     "require": {
         "php": ">=8.2",
         "ext-json": "*",
