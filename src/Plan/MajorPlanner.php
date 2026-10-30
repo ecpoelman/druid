@@ -71,8 +71,31 @@ final class MajorPlanner
             description: 'Runs upgrade_status (when installed) to list deprecated code and incompatible extensions. Informational - it does not stop the run.',
         )];
 
-        foreach (PhpRequirements::problems($targetMajor, isset($scan->environment['php']) ? (string) $scan->environment['php'] : null, $this->project) as $problem) {
+        // The site's own PHP needs the user. The core step raises config.platform.php; hosting files get a step.
+        foreach (PhpRequirements::problems($targetMajor, isset($scan->environment['php']) ? (string) $scan->environment['php'] : null) as $problem) {
             $notes[] = $problem;
+        }
+        $phpVersion = PhpRequirements::shortMinimum($targetMajor);
+        if (PhpRequirements::platformPhpTooLow($targetMajor, $this->project)) {
+            $notes[] = 'composer.json pins config.platform.php to ' . PhpRequirements::platformPhp($this->project) . " - the core step raises it to {$phpVersion}.";
+        }
+        $hosting = PhpRequirements::outdatedHostingPhp($targetMajor, $this->project->root);
+        if ($hosting !== []) {
+            $steps[] = new Step(
+                'php-platform',
+                Step::PHP_PLATFORM,
+                Step::SCOPE_MAJOR,
+                "Set the hosting PHP version to {$phpVersion}",
+                null,
+                null,
+                $target,
+                description: "Drupal {$targetMajor} needs PHP {$phpVersion}+ on the server: " . implode(', ', array_map(
+                    static fn (string $file, string $version): string => "{$file} has {$version}",
+                    array_keys($hosting),
+                    $hosting,
+                )) . '.',
+                packages: array_map(static fn (string $file): string => "edit {$file}: php_version: {$phpVersion}", array_keys($hosting)),
+            );
         }
 
         $planned = [];

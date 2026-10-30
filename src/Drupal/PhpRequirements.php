@@ -85,6 +85,42 @@ final class PhpRequirements
         return $commands;
     }
 
+    /**
+     * Hosting files whose php_version is below what Drupal `$drupalMajor` needs.
+     *
+     * @return array<string, string> file => version
+     */
+    public static function outdatedHostingPhp(int $drupalMajor, string $root): array
+    {
+        $minimum = self::minimumFor($drupalMajor);
+        return array_filter(self::hostingPhp($root), static fn (string $version): bool => self::below($version, $minimum));
+    }
+
+    public static function platformPhpTooLow(int $drupalMajor, ComposerProject $project): bool
+    {
+        $platform = self::platformPhp($project);
+        return $platform !== null && self::below($platform, self::minimumFor($drupalMajor));
+    }
+
+    /**
+     * Sets php_version in a hosting file (pantheon.yml, .ddev/config.yaml), leaving the rest untouched.
+     */
+    public static function setHostingPhp(string $root, string $file, string $version): bool
+    {
+        $path = $root . '/' . $file;
+        $yaml = @file_get_contents($path);
+        if ($yaml === false) {
+            return false;
+        }
+        $updated = preg_replace('/^php_version:[^\S\n]*[^\s#]*/m', 'php_version: ' . $version, $yaml, 1, $count);
+        return $count === 1 && is_string($updated) && file_put_contents($path, $updated) !== false;
+    }
+
+    public static function shortMinimum(int $drupalMajor): string
+    {
+        return self::short(self::minimumFor($drupalMajor));
+    }
+
     public static function platformPhp(ComposerProject $project): ?string
     {
         $platform = $project->json()['config']['platform']['php'] ?? null;

@@ -19,6 +19,7 @@ final class Step
     public const READINESS = 'readiness';
     public const RECTOR = 'rector';
     public const INFO_FILES = 'info-files';
+    public const PHP_PLATFORM = 'php-platform';
 
     public const SCOPE_SECURITY = 'security';
     public const SCOPE_MINOR = 'minor';
@@ -68,6 +69,14 @@ final class Step
     public function withTarget(string $to): self
     {
         return new self($this->id, $this->kind, $this->scope, $this->title, $this->package, $this->from, $to, $this->severity, $this->risk, $this->description, $this->critical, $this->affected, $this->companions, $this->direct, $this->packages);
+    }
+
+    /**
+     * @param array<string, string> $companions added to (and overriding) the existing companions
+     */
+    public function withCompanions(array $companions): self
+    {
+        return new self($this->id, $this->kind, $this->scope, $this->title, $this->package, $this->from, $this->to, $this->severity, $this->risk, $this->description, $this->critical, $this->affected, $companions + $this->companions, $this->direct, $this->packages);
     }
 
     /**

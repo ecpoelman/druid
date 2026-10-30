@@ -328,11 +328,12 @@ final class Engine
         $major = VersionResolver::major($step->to);
         $php = $this->scan?->environment['php'] ?? null;
         $php = is_string($php) && $php !== '' ? $php : null;
-        $problems = PhpRequirements::problems($major, $php, $this->context->project);
+        // Only the PHP running the site blocks: the core step raises config.platform.php itself.
+        $problems = PhpRequirements::problems($major, $php);
         if ($problems === []) {
             return null;
         }
-        return new Diagnosis(Diagnosis::PHP_REQUIREMENT, "Drupal {$major} needs PHP " . PhpRequirements::minimumFor($major) . '+ but the project is pinned lower', $problems, PhpRequirements::fixCommands($major, $this->context->project));
+        return new Diagnosis(Diagnosis::PHP_REQUIREMENT, "Drupal {$major} needs PHP " . PhpRequirements::minimumFor($major) . "+ but the site runs PHP {$php}", $problems);
     }
 
     /**

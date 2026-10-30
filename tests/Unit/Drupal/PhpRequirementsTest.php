@@ -11,6 +11,18 @@ use PHPUnit\Framework\TestCase;
 
 final class PhpRequirementsTest extends TestCase
 {
+    public function testHostingPhpIsRaisedInPlace(): void
+    {
+        $root = TempProject::create(['config' => ['platform' => ['php' => '8.2.0']]]);
+        file_put_contents($root . '/pantheon.yml', "api_version: 1\nphp_version: 8.2 # pinned\ndatabase:\n  version: 10.6\n");
+
+        self::assertSame(['pantheon.yml' => '8.2'], PhpRequirements::outdatedHostingPhp(11, $root));
+        self::assertTrue(PhpRequirements::platformPhpTooLow(11, new ComposerProject($root)));
+        self::assertTrue(PhpRequirements::setHostingPhp($root, 'pantheon.yml', '8.3'));
+        self::assertSame("api_version: 1\nphp_version: 8.3 # pinned\ndatabase:\n  version: 10.6\n", file_get_contents($root . '/pantheon.yml'));
+        self::assertSame([], PhpRequirements::outdatedHostingPhp(11, $root));
+    }
+
     protected function tearDown(): void
     {
         TempProject::cleanup();

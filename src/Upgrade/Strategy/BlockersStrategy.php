@@ -27,6 +27,20 @@ final class BlockersStrategy implements Strategy
         }
 
         $ignore = array_filter([$context->project->name(), $step->package]);
+        $attempts = [];
+        $raise = [];
+        foreach ($context->outputs as $output) {
+            $raise += ProblemParser::rootConflicts($output);
+        }
+        $raise = array_filter(
+            $raise,
+            static fn (string $package): bool => !in_array($package, $ignore, true) && !ComposerProject::isCorePackage($package) && $context->project->isDirect($package),
+            ARRAY_FILTER_USE_KEY,
+        );
+        if ($raise !== []) {
+            $attempts[] = $context->builder->raisingRoot($step, $raise);
+        }
+
         $blockers = $context->blockers();
 
         $whyNot = $context->composer->whyNot($step->isCore() ? 'drupal/core' : $step->package, $step->to);
@@ -44,10 +58,10 @@ final class BlockersStrategy implements Strategy
             },
         )));
 
-        if ($blockers === []) {
-            return [];
+        if ($blockers !== []) {
+            $attempts[] = $context->builder->withBlockers($step, array_slice($blockers, 0, self::MAX_BLOCKERS));
         }
-        return [$context->builder->withBlockers($step, array_slice($blockers, 0, self::MAX_BLOCKERS))];
+        return $attempts;
     }
 
     /**

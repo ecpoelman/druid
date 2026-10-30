@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Druid\Upgrade;
 
 use Druid\Composer\ComposerProject;
+use Druid\Drupal\PhpRequirements;
 use Druid\Plan\Step;
 use Druid\Security\VersionResolver;
 
@@ -151,6 +152,37 @@ final class CommandBuilder
     }
 
     /**
+     * Raises root requirements that the new release's dependencies conflict with, and moves them too.
+     *
+     * @param array<string, string> $raise package => constraint the dependency asks for
+     */
+    public function raisingRoot(Step $step, array $raise): Attempt
+    {
+        $description = 'Raise root requirements: ' . implode(', ', array_map(
+            static fn (string $package, string $constraint): string => "{$package}:{$constraint}",
+            array_keys($raise),
+            $raise,
+        ));
+        if ($step->isCore()) {
+            $base = $this->core($step->withCompanions($raise), true);
+            return new Attempt('blockers', $description, $base->args, [], $base->prerequisites);
+        }
+
+        $package = (string) $step->package;
+        $target = (string) $step->to;
+        $prerequisites = [];
+        $constraint = $this->project->constraint($package);
+        if ($constraint !== null && !VersionResolver::constraintAllows($constraint, $target)) {
+            $prerequisites[] = new Attempt('blockers', 'Raise constraint without updating', $this->requireNoUpdate($package, $this->project->constraintFor($package, $target)));
+        }
+        foreach ($raise as $dependency => $wanted) {
+            $prerequisites[] = new Attempt('blockers', "Raise {$dependency}", $this->requireNoUpdate($dependency, $wanted));
+        }
+        $args = array_merge(['update', "{$package}:{$target}"], array_keys($raise), ['--with-dependencies']);
+        return new Attempt('blockers', $description, $args, [], $prerequisites);
+    }
+
+    /**
      * Lets Composer move every dependency, including root packages such as Drupal core (`-W`).
      */
     public function allDependencies(Step $step): Attempt
@@ -223,6 +255,10 @@ final class CommandBuilder
         }
 
         $prerequisites = [];
+        $major = VersionResolver::major($target);
+        if ($step->kind === Step::MAJOR_CORE && PhpRequirements::platformPhpTooLow($major, $this->project)) {
+            $prerequisites[] = new Attempt('isolated', 'Raise config.platform.php', ['config', 'platform.php', PhpRequirements::shortMinimum($major)]);
+        }
         if ($sections['require'] !== []) {
             $prerequisites[] = new Attempt('isolated', 'Set core constraints', array_merge(['require'], $sections['require'], ['--no-update']));
         }

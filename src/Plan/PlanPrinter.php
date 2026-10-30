@@ -97,7 +97,8 @@ final class PlanPrinter
                 'composer require mglaman/composer-drupal-lenient (when missing)',
                 'composer config --json extra.drupal-lenient.allowed-list ' . json_encode($step->packages, JSON_UNESCAPED_SLASHES) . ' (merged with the existing list)',
             ],
-            Step::READINESS => ['drush upgrade_status:checkstyle --all (when upgrade_status is installed)'],
+            Step::READINESS => ['drush upgrade_status:checkstyle <custom modules and themes> (when upgrade_status is installed)'],
+            Step::PHP_PLATFORM => $step->packages,
             Step::RECTOR => ['vendor/bin/rector process ' . implode(' ', $step->packages) . ' (drupal-rector; --dry-run unless --rector)'],
             Step::INFO_FILES => array_map(
                 static fn (string $file): string => "edit {$file}: core_version_requirement += ^" . VersionResolver::major((string) $step->to),

@@ -21,6 +21,17 @@ OUT;
         self::assertSame('drupal/core', $problems[0]->package);
     }
 
+    public function testFindsRootRequirementsADependencyNeedsRaised(): void
+    {
+        $output = <<<'OUT'
+  Problem 1
+    - Root composer.json requires drupal/recaptcha_v3 ^2.0.5 -> satisfiable by drupal/recaptcha_v3[2.0.5].
+    - drupal/recaptcha_v3 2.0.5 requires drupal/captcha ^2.0 -> found drupal/captcha[2.0.0, ..., 2.0.11] but it conflicts with your root composer.json require (^1.17).
+OUT;
+        self::assertSame(['drupal/captcha' => '^2.0'], ProblemParser::rootConflicts($output));
+        self::assertSame([], ProblemParser::rootConflicts('drupal/foo 1.0.0 requires drupal/core ^10 -> found drupal/core[10.6.9] but these were not loaded'));
+    }
+
     public function testParsesLockedContribProblem(): void
     {
         $output = <<<'OUT'

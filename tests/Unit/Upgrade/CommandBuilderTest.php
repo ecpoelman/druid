@@ -131,6 +131,27 @@ final class CommandBuilderTest extends TestCase
         self::assertSame(['update', 'drupal/core-recommended:11.2.5', 'drush/drush', '--with-all-dependencies'], $attempt->args);
     }
 
+    public function testRaisingRootRequirementsJoinsTheCoreStep(): void
+    {
+        $builder = new CommandBuilder(new ComposerProject(TempProject::create(['require' => [
+            'drupal/core-recommended' => '^10.6',
+            'drupal/recaptcha_v3' => '^1.9',
+            'drupal/captcha' => '^1.17',
+        ]])), true);
+        $step = self::core('10.6.20', '11.4.11', Step::MAJOR_CORE, ['drupal/recaptcha_v3' => '^2.0.5']);
+
+        $attempt = $builder->raisingRoot($step, ['drupal/captcha' => '^2.0']);
+
+        self::assertSame('blockers', $attempt->strategy);
+        self::assertSame(['require', 'drupal/core-recommended:^11.4', 'drupal/captcha:^2.0', 'drupal/recaptcha_v3:^2.0.5', '--no-update'], $attempt->prerequisites[0]->args);
+        self::assertSame(['update', 'drupal/core-recommended:11.4.11', 'drupal/captcha', 'drupal/recaptcha_v3', '--with-all-dependencies'], $attempt->args);
+
+        $contrib = $builder->raisingRoot(self::module('drupal/recaptcha_v3', '1.9.0', '2.0.5'), ['drupal/captcha' => '^2.0']);
+        self::assertSame(['require', 'drupal/recaptcha_v3:^2.0.5', '--no-update'], $contrib->prerequisites[0]->args);
+        self::assertSame(['require', 'drupal/captcha:^2.0', '--no-update'], $contrib->prerequisites[1]->args);
+        self::assertSame(['update', 'drupal/recaptcha_v3:2.0.5', 'drupal/captcha', '--with-dependencies'], $contrib->args);
+    }
+
     public function testAllDependenciesRaisesConstraintWithoutUpdatingFirst(): void
     {
         $builder = new CommandBuilder(new ComposerProject(TempProject::create(['require' => ['drupal/linkit' => '^6.1']])), true);

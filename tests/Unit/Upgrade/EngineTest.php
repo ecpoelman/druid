@@ -273,20 +273,29 @@ OUT;
         self::assertContains('info: Retrying the strategies with what the failures revealed (COMPOSER_NO_BLOCKING, COMPOSER_NO_SECURITY_BLOCKING)', $this->listener->events);
     }
 
-    public function testMajorCoreIsDeferredUpFrontWhenPhpIsPinnedTooLow(): void
+    public function testMajorCoreRaisesAPlatformPhpPinThatIsTooLow(): void
     {
         $json = json_decode((string) file_get_contents($this->root . '/composer.json'), true);
         $json['config'] = ['platform' => ['php' => '8.2']];
         file_put_contents($this->root . '/composer.json', json_encode($json));
+        $this->runner->on(function (array $c): ?\Druid\Environment\ProcessResult {
+            if (($c[1] ?? '') === 'update') {
+                $this->lockVersion('drupal/core', '11.4.9');
+                return ScriptedProcessRunner::ok();
+            }
+            return in_array($c[1] ?? '', ['config', 'require'], true) ? ScriptedProcessRunner::ok() : null;
+        });
         $major = new Step('major-core', Step::MAJOR_CORE, Step::SCOPE_MAJOR, 'Drupal core 10.6.9 → 11.4.9', 'drupal/core', '10.6.9', '11.4.9', critical: true);
 
         $result = $this->runPlan(new UpgradePlan('acme', Step::SCOPE_MAJOR, [$major]));
 
-        self::assertSame(StepResult::DEFERRED, $result->steps[0]->status);
-        self::assertSame(0, $result->steps[0]->attempts);
-        self::assertSame([], $this->listener->strategies);
-        self::assertSame(\Druid\Upgrade\Diagnosis::PHP_REQUIREMENT, $result->steps[0]->diagnosis?->kind);
-        self::assertContains('composer config platform.php 8.3', $result->steps[0]->diagnosis->suggestedCommands);
+        self::assertSame(StepResult::UPGRADED, $result->steps[0]->status);
+        $composer = array_values(array_filter(
+            array_map(static fn (array $call): array => array_slice($call['command'], 1, 3), $this->runner->calls),
+            static fn (array $args): bool => in_array($args[0] ?? '', ['config', 'require', 'update'], true),
+        ));
+        self::assertSame(['config', 'platform.php', '8.3'], $composer[0]);
+        self::assertSame('require', $composer[1][0]);
     }
 
     public function testStepsThatNeededNewerCoreAreRetriedAfterCoreMoves(): void

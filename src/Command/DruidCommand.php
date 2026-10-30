@@ -23,6 +23,7 @@ use Druid\Upgrade\Engine;
 use Druid\Major\PhpstanRunner;
 use Druid\Upgrade\Handler\InfoFileHandler;
 use Druid\Upgrade\Handler\LenientHandler;
+use Druid\Upgrade\Handler\PhpPlatformHandler;
 use Druid\Upgrade\Handler\ReadinessHandler;
 use Druid\Upgrade\Handler\RectorHandler;
 use Druid\Upgrade\Strategy\StrategyFactory;
@@ -142,6 +143,7 @@ abstract class DruidCommand extends Command
             new LenientHandler($context->project, $context->composer),
             new RectorHandler(new RectorRunner($context), $applyRector),
             new InfoFileHandler($context->root()),
+            new PhpPlatformHandler($context->root()),
         ];
         return new Engine(
             $context,

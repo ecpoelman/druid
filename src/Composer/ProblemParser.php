@@ -132,6 +132,24 @@ final class ProblemParser
     }
 
     /**
+     * Root requirements another package needs raised, with the constraint it asks for:
+     * "drupal/recaptcha_v3 2.0.5 requires drupal/captcha ^2.0 -> found drupal/captcha[2.0.0, ...] but it
+     * conflicts with your root composer.json require (^1.17)" gives ["drupal/captcha" => "^2.0"].
+     *
+     * @return array<string, string>
+     */
+    public static function rootConflicts(string $output): array
+    {
+        $pattern = '/requires (' . self::PACKAGE_PATTERN . ') (\S+) -> found \S+\[[^\]]*\] but it conflicts with your root composer\.json require/i';
+        preg_match_all($pattern, $output, $matches, PREG_SET_ORDER);
+        $found = [];
+        foreach ($matches as $match) {
+            $found[strtolower($match[1])] ??= $match[2];
+        }
+        return $found;
+    }
+
+    /**
      * PKSA advisory identifiers mentioned in output.
      *
      * @return list<string>
