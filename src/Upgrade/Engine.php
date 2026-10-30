@@ -28,7 +28,16 @@ final class Engine
     /** Strategies left out of the second pass: their candidates were already tried and may be insecure. */
     private const FIRST_PASS_ONLY = ['step_down'];
 
+    /** Fewest contrib steps worth a combined Composer run. */
+    private const MIN_BATCH = 2;
+
+    /** A failed batch is halved this many times before falling back to one step at a time. */
+    private const MAX_BATCH_SPLITS = 2;
+
     private bool $drupalBoots = false;
+
+    /** Set once core moves to a new major: Drupal can't boot until contrib and custom code follow. */
+    private bool $drupalChecksDeferred = false;
     private readonly FailureAnalyzer $analyzer;
     private readonly Verifier $verifier;
 
@@ -60,20 +69,154 @@ final class Engine
             return $result;
         }
 
+        $results = [];
         $total = count($plan->steps);
-        foreach ($plan->steps as $index => $step) {
-            $this->listener->stepStarted($index + 1, $total, $step);
-            $coreLater = array_filter(array_slice($plan->steps, $index + 1), static fn (Step $s): bool => $s->isCore()) !== [];
-            $stepResult = $this->safeRunStep($step, $options, $coreLater);
-            $result->steps[] = $stepResult;
-            $this->listener->stepFinished($stepResult);
+        for ($index = 0; $index < $total;) {
+            $group = [];
+            if ($options->batch) {
+                for ($next = $index; $next < $total && $this->batchable($plan->steps[$next]); $next++) {
+                    $group[$next] = $plan->steps[$next];
+                }
+            }
+            if (count($group) >= self::MIN_BATCH) {
+                $results += $this->runBatch($group, $plan, $options, 0);
+                $index += count($group);
+                continue;
+            }
+            $results[$index] = $this->runSingle($index, $plan, $options);
+            $index++;
         }
+        ksort($results);
+        $result->steps = array_values($results);
 
         $this->retryStepsThatNeededNewerCore($result, $options);
         $this->postUpdate($result, $options);
         $result->snapshot?->recordResult($result->toArray());
         $this->listener->runFinished($result);
         return $result;
+    }
+
+    // MARK: - Steps and batches
+
+    private function runSingle(int $index, UpgradePlan $plan, EngineOptions $options): StepResult
+    {
+        $step = $plan->steps[$index];
+        $this->listener->stepStarted($index + 1, count($plan->steps), $step);
+        $coreLater = array_filter(array_slice($plan->steps, $index + 1), static fn (Step $s): bool => $s->isCore()) !== [];
+        $majorCore = $step->kind === Step::MAJOR_CORE && !$this->drupalChecksDeferred;
+        if ($majorCore) {
+            $this->drupalChecksDeferred = true;
+        }
+        $stepResult = $this->safeRunStep($step, $options, $coreLater);
+        if ($majorCore && $stepResult->status !== StepResult::UPGRADED) {
+            $this->drupalChecksDeferred = false;
+        } elseif ($majorCore && $this->drupalBoots) {
+            $this->listener->notice('info', 'Drupal checks (drush updatedb, cache:rebuild) wait until contrib and custom code are on the new major - they run at the end.');
+        }
+        $this->listener->stepFinished($stepResult);
+        return $stepResult;
+    }
+
+    /**
+     * Contrib updates of installed packages: the steps a single combined `composer update` can serve.
+     */
+    private function batchable(Step $step): bool
+    {
+        if ($step->isCore() || !$step->isComposerStep() || $step->package === null || $step->from === null || $step->to === null) {
+            return false;
+        }
+        foreach ($this->handlers as $handler) {
+            if ($handler->supports($step)) {
+                return false;
+            }
+        }
+        return $this->phpBlocker($step) === null;
+    }
+
+    /**
+     * Moves every step in one Composer run. Packages that reach their target are done; the rest
+     * (or the halves of a failed batch) go through the regular per-step ladder.
+     *
+     * @param array<int, Step> $group plan index => step
+     * @return array<int, StepResult>
+     */
+    private function runBatch(array $group, UpgradePlan $plan, EngineOptions $options, int $splits): array
+    {
+        $results = [];
+        $pending = [];
+        foreach ($group as $index => $step) {
+            $installed = $this->installedVersion($step);
+            if ($installed !== null && VersionResolver::compare($installed, (string) $step->to) >= 0) {
+                $results[$index] = $this->report($index, $plan, new StepResult($step, StepResult::SATISFIED, $installed, null, 0, null, "Already at {$installed}"));
+                continue;
+            }
+            $pending[$index] = $step;
+        }
+        if (count($pending) < self::MIN_BATCH) {
+            foreach (array_keys($pending) as $index) {
+                $results[$index] = $this->runSingle($index, $plan, $options);
+            }
+            return $results;
+        }
+
+        $env = [];
+        foreach ($pending as $step) {
+            $env += CommandBuilder::baseEnv($step, $options->bypassAuditBlockingForSecurity);
+        }
+        $attempt = $this->builder->batch(array_values($pending))->withEnv($env);
+        $this->listener->notice('info', sprintf(
+            'Trying steps %s together in one Composer run (%d packages)',
+            self::stepRange(array_keys($pending)),
+            count($pending),
+        ));
+        $outcome = $this->execute($attempt, reset($pending), 1, $options);
+        if (!$outcome['ok'] && $outcome['diagnosis']?->isAuditBlocked() && array_diff_key(CommandBuilder::NO_AUDIT_BLOCKING_ENV, $attempt->env) !== []) {
+            $this->listener->notice('info', 'Composer\'s audit blocked the combined run - retrying it with audit blocking bypassed.');
+            $outcome = $this->execute($attempt->withEnv(CommandBuilder::NO_AUDIT_BLOCKING_ENV), reset($pending), 2, $options);
+        }
+
+        if (!$outcome['ok']) {
+            if ($splits < self::MAX_BATCH_SPLITS && count($pending) >= 2 * self::MIN_BATCH) {
+                $this->listener->notice('info', 'The combined run failed - trying each half on its own.');
+                $half = intdiv(count($pending), 2);
+                $results += $this->runBatch(array_slice($pending, 0, $half, true), $plan, $options, $splits + 1);
+                $results += $this->runBatch(array_slice($pending, $half, null, true), $plan, $options, $splits + 1);
+                return $results;
+            }
+            $this->listener->notice('info', 'The combined run failed - continuing one step at a time.');
+            foreach (array_keys($pending) as $index) {
+                $results[$index] = $this->runSingle($index, $plan, $options);
+            }
+            return $results;
+        }
+
+        foreach ($pending as $index => $step) {
+            $achieved = $this->installedVersion($step);
+            if ($achieved !== null && VersionResolver::compare($achieved, (string) $step->to) >= 0) {
+                $results[$index] = $this->report($index, $plan, new StepResult($step, StepResult::UPGRADED, $achieved, 'batch', 1, null, 'Upgraded', $outcome['warnings']));
+                continue;
+            }
+            // Fell short of the target in the combined run; the ladder can still find a way.
+            $results[$index] = $this->runSingle($index, $plan, $options);
+        }
+        return $results;
+    }
+
+    private function report(int $index, UpgradePlan $plan, StepResult $stepResult): StepResult
+    {
+        $this->listener->stepStarted($index + 1, count($plan->steps), $stepResult->step);
+        $this->listener->stepFinished($stepResult);
+        return $stepResult;
+    }
+
+    /**
+     * @param list<int> $indexes zero-based plan indexes
+     */
+    private static function stepRange(array $indexes): string
+    {
+        $first = min($indexes) + 1;
+        $last = max($indexes) + 1;
+        return count($indexes) === $last - $first + 1 ? "{$first}-{$last}" : implode(', ', array_map(static fn (int $i): int => $i + 1, $indexes));
     }
 
     // MARK: - Preflight
@@ -325,7 +468,7 @@ final class Engine
             return ['ok' => true, 'output' => $output, 'diagnosis' => null, 'warnings' => []];
         }
 
-        $verification = $this->verifier->verify($this->drupalBoots, $step->kind === Step::MAJOR_CORE);
+        $verification = $this->verifier->verify($this->drupalBoots && !$this->drupalChecksDeferred);
         if (!$verification->ok) {
             $diagnosis = new Diagnosis(Diagnosis::VERIFICATION_FAILED, $verification->messages[0] ?? 'Verification failed', $verification->messages);
             $this->listener->attemptFailed($diagnosis, $output);

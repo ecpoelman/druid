@@ -40,6 +40,15 @@ final class ScriptedProcessRunner extends ProcessRunner
         return self::fail(implode(' ', $command), 'No scripted response');
     }
 
+    public function runParallel(array $jobs): array
+    {
+        $results = [];
+        foreach ($jobs as $key => $job) {
+            $results[$key] = $this->run($job['command'], $job['cwd'] ?? null, $job['env'] ?? []);
+        }
+        return $results;
+    }
+
     public function resolveExecutable(string $name): ?string
     {
         return $name;

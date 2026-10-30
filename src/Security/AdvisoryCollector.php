@@ -26,11 +26,13 @@ final class AdvisoryCollector
      * Advisories that apply to the installed versions, keyed by package.
      *
      * @param array<string, string> $installed package => installed version
+     * @param array{advisories: array<string, list<array<string, mixed>>>, abandoned: array<string, string|null>}|null $audit
+     *        an already-run `composer audit`
      * @return array<string, list<Advisory>>
      */
-    public function collect(array $installed): array
+    public function collect(array $installed, ?array $audit = null): array
     {
-        $audit = $this->composer->audit();
+        $audit ??= $this->composer->audit();
         $this->abandoned = $audit['abandoned'];
 
         $byPackage = [];

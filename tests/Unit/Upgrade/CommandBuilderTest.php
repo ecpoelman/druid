@@ -54,6 +54,31 @@ final class CommandBuilderTest extends TestCase
         self::assertSame(['require', 'drupal/tour:^2.0.6'], array_slice($new, 0, 2));
     }
 
+    public function testBatchRaisesOnlyConstraintsThatBlockTheirTarget(): void
+    {
+        $builder = new CommandBuilder(new ComposerProject(TempProject::create([
+            'require' => ['drupal/webform' => '^6.2', 'drupal/admin_toolbar' => '3.5.1', 'drupal/token' => '~1.13.0'],
+            'require-dev' => ['drupal/devel' => '^5.1'],
+        ])), true);
+
+        $attempt = $builder->batch([
+            self::module('drupal/webform', '6.2.0', '6.2.12'),
+            self::module('drupal/admin_toolbar', '3.5.1', '3.5.4'),
+            self::module('drupal/token', '1.13.0', '1.15.0'),
+            self::module('drupal/ctools', '4.1.0', '4.1.1'),
+            self::module('drupal/devel', '5.1.0', '6.0.0'),
+        ]);
+
+        self::assertSame('batch', $attempt->strategy);
+        self::assertSame(
+            ['update', 'drupal/webform:6.2.12', 'drupal/admin_toolbar:3.5.4', 'drupal/token:1.15.0', 'drupal/ctools:4.1.1', 'drupal/devel:6.0.0', '--with-dependencies', '--minimal-changes'],
+            $attempt->args,
+        );
+        self::assertCount(2, $attempt->prerequisites);
+        self::assertSame(['require', 'drupal/admin_toolbar:3.5.4', 'drupal/token:~1.15.0', '--no-update'], $attempt->prerequisites[0]->args);
+        self::assertSame(['require', '--dev', 'drupal/devel:^6.0.0', '--no-update'], $attempt->prerequisites[1]->args);
+    }
+
     public function testRequireBumpSkipsTransitivePackages(): void
     {
         $builder = new CommandBuilder(new ComposerProject(TempProject::create(['require' => ['drupal/webform' => '^6.2']])), false);

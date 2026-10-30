@@ -17,8 +17,9 @@ use Druid\Scan\ScanResult;
 use Druid\Security\VersionResolver;
 
 /**
- * Plans the move to the next Drupal core major: readiness check, contrib releases that bridge both
- * majors (installed first), contrib that must move together with core, lenient fallbacks, then core.
+ * Plans the move to the next Drupal core major, core first: readiness check, core within its major,
+ * lenient fallbacks, the major core step (with the contrib it can't move without), the remaining contrib
+ * updates one at a time, then custom modules and themes.
  */
 final class MajorPlanner
 {
@@ -32,7 +33,8 @@ final class MajorPlanner
 
     /**
      * @param list<Step> $existing steps already planned (security and minor)
-     * @return array{steps: list<Step>, notes: list<string>, target: ?string}
+     * @return array{steps: list<Step>, notes: list<string>, target: ?string} steps is the whole run, `$existing` included
+     *         (empty when there is no major to move to)
      */
     public function plan(ScanResult $scan, PlanOptions $options, array $existing): array
     {
@@ -80,7 +82,7 @@ final class MajorPlanner
             }
         }
 
-        $bridgeSteps = [];
+        // Contrib whose release can't run on the new major would block core, so it moves with core.
         $companions = [];
         $lenient = [];
         foreach ($this->compatibility($bridgeCore, $target, $planned) as $package => $decision) {
@@ -93,21 +95,9 @@ final class MajorPlanner
                     $notes[] = "No drupal.org release data for {$package} - check its Drupal {$targetMajor} support manually.";
                     break;
                 case 'bridge':
-                    $bridgeSteps[] = new Step(
-                        'major:' . $package,
-                        Step::MODULE,
-                        Step::SCOPE_MAJOR,
-                        "{$package} {$current} → {$decision['version']} (supports Drupal {$targetMajor})",
-                        $package,
-                        $current,
-                        $decision['version'],
-                        risk: VersionResolver::sameMajor($current, $decision['version']) ? 'medium' : 'high',
-                        description: "Release that works on both Drupal {$bridgeCore} and {$target}, installed before core moves.",
-                    );
-                    break;
                 case 'companion':
-                    $companions[$package] = $this->project->constraintFor($package, $decision['version']);
-                    $notes[] = "{$package} {$current} → {$decision['version']} moves together with core (no release supports both majors).";
+                    $companions[$package] = $this->project->constraintFor($package, (string) $decision['version']);
+                    $notes[] = "{$package} {$current} → {$decision['version']} moves together with core ({$current} does not support Drupal {$targetMajor}).";
                     break;
                 case 'lenient':
                     $lenient[] = $package;
@@ -120,7 +110,11 @@ final class MajorPlanner
             }
         }
 
-        $steps = array_merge($steps, $bridgeSteps);
+        foreach ($existing as $step) {
+            if ($step->isCore()) {
+                $steps[] = $step;
+            }
+        }
 
         if ($lenient !== []) {
             sort($lenient);
@@ -154,29 +148,40 @@ final class MajorPlanner
             $notes[] = "Drush {$this->drush->version} does not support Drupal {$targetMajor} - drush/drush moves to ^13 with core.";
         }
 
-        // Rector runs before core moves: its rules resolve the deprecated APIs that the new major removes.
-        if ($options->rector || $scan->customModules !== []) {
-            $steps[] = self::rectorStep($scan->customModules, $this->project->root, $options->rector, Step::SCOPE_MAJOR);
-        }
-
-        $infoStep = self::infoFilesStep($scan->customModules, $this->project->root, $bridgeCore, $target, Step::SCOPE_MAJOR);
-        if ($infoStep !== null) {
-            $steps[] = $infoStep;
-        }
-
+        ksort($companions);
         $steps[] = new Step(
             'major-core',
             Step::MAJOR_CORE,
             Step::SCOPE_MAJOR,
-            "Drupal core {$bridgeCore} → {$target}",
+            "Drupal core {$bridgeCore} → {$target}" . ($companions !== [] ? ' with ' . count($companions) . ' contrib package(s)' : ''),
             'drupal/core',
             $bridgeCore,
             $target,
             risk: 'high',
-            description: 'All core packages move to the new major together' . ($companions !== [] ? ' with ' . implode(', ', array_keys($companions)) : '') . '. Database updates run afterwards.',
+            description: 'All core packages move to the new major together' . ($companions !== [] ? ' with ' . implode(', ', array_keys($companions)) : '') . '. Database updates run at the end of the run, once contrib and custom code are on the new major.',
             critical: true,
             companions: $companions,
         );
+
+        // Remaining contrib updates, one at a time on the new core. Companions already moved past them.
+        foreach ($existing as $step) {
+            if ($step->isCore() || in_array($step->kind, [Step::RECTOR, Step::INFO_FILES], true)) {
+                continue;
+            }
+            if ($step->package !== null && isset($companions[$step->package])) {
+                continue;
+            }
+            $steps[] = $step;
+        }
+
+        // Custom code last: it is patched against the core and contrib it will run with.
+        if ($options->rector || $scan->customModules !== []) {
+            $steps[] = self::rectorStep($scan->customModules, $this->project->root, $options->rector, Step::SCOPE_MAJOR);
+        }
+        $infoStep = self::infoFilesStep($scan->customModules, $this->project->root, $bridgeCore, $target, Step::SCOPE_MAJOR);
+        if ($infoStep !== null) {
+            $steps[] = $infoStep;
+        }
 
         return ['steps' => $steps, 'notes' => $notes, 'target' => $target];
     }

@@ -56,6 +56,8 @@ final class Config
                 'step_down_attempts' => 3,
                 // Upper bound on Composer attempts for a single step across all strategies.
                 'max_attempts' => 14,
+                // Contrib steps first move together in one Composer run; only what fails goes step by step.
+                'batch' => true,
                 // Composer plugins druid may add to allow-plugins when an upgrade pulls them in.
                 'trusted_plugins' => [
                     'composer/installers',

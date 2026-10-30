@@ -11,8 +11,9 @@ and keeps track of every local Drupal site that needs security or compatibility 
   (the lowest version that clears every advisory, in the same major).
 - **Upgrade**: a whole site, core only, or individual modules. Each step is snapshotted and verified. If it fails,
   druid tries another strategy, then defers the step and carries on. It does not abort the run.
-- **Major upgrades** (e.g. 10 → 11): upgrade_status readiness check, compatible contrib releases first,
-  the composer-drupal-lenient plugin for modules that haven't declared support yet, drupal-rector for custom code.
+- **Major upgrades** (e.g. 10 → 11): upgrade_status readiness check, then core first (with the contrib it needs and
+  the composer-drupal-lenient plugin for modules that haven't declared support yet), then the remaining contrib
+  one by one, then drupal-rector and `.info.yml` fixes for custom code.
 
 Requires PHP 8.2+ and Composer 2 (2.7+ recommended for `--minimal-changes`).
 
@@ -159,9 +160,17 @@ druid plan --major                           # review the full path
 druid upgrade:major --rector                 # do it, applying drupal-rector to custom modules
 ```
 
-druid moves core to the latest minor of the current major first. It then installs contrib releases that support
-both majors, adds modules that only support the new major to the core step, puts modules with no declared
-support on the lenient allow-list, bumps Drush to 13 for Drupal 11, and finally moves all core packages together.
+Core goes first, then contrib, then custom code:
+
+1. core moves to the latest minor of the current major;
+2. all core packages move to the new major together with what they can't move without: contrib whose installed
+   release doesn't support the new major (raised to the first line that does), Drush 13 for Drupal 11, and the
+   lenient allow-list for modules with no declared support;
+3. the remaining contrib updates run one at a time on the new core (tried together first; set
+   `upgrade.batch: false` in `druid.yml` to always go one by one);
+4. custom modules and themes are patched: drupal-rector, then `core_version_requirement`.
+
+Drupal can't boot halfway through, so `drush updatedb` and `cache:rebuild` run once, at the end.
 
 Along the way it:
 

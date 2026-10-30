@@ -23,6 +23,7 @@ final class EngineOptions
         public readonly int $maxAttemptsPerStep = 14,
         public readonly bool $rector = false,
         public readonly bool $streamOutput = false,
+        public readonly bool $batch = true,
     ) {
     }
 
@@ -37,6 +38,7 @@ final class EngineOptions
             (int) $config->get('upgrade.max_attempts', 14),
             $rector,
             $streamOutput,
+            $config->bool('upgrade.batch', true),
         );
     }
 }

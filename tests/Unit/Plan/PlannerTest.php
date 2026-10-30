@@ -6,6 +6,8 @@ namespace Druid\Tests\Unit\Plan;
 
 use Druid\Composer\ComposerProject;
 use Druid\Config\Config;
+use Druid\Drupal\ReleaseHistoryClient;
+use Druid\Plan\MajorPlanner;
 use Druid\Plan\PlanOptions;
 use Druid\Plan\Planner;
 use Druid\Plan\Step;
@@ -16,6 +18,8 @@ use Druid\Security\Advisory;
 use Druid\Security\Severity;
 use Druid\Tests\Support\TempProject;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
 
 final class PlannerTest extends TestCase
 {
@@ -57,6 +61,40 @@ final class PlannerTest extends TestCase
     private function planner(array $config = []): Planner
     {
         return new Planner(new Config(Config::merge(Config::defaults(), $config)), $this->project);
+    }
+
+    public function testMajorRunsCoreFirstThenContribThenCustomCode(): void
+    {
+        $root = TempProject::create(
+            ['require' => ['drupal/core-recommended' => '^10.6', 'drupal/webform' => '^6.2', 'drupal/token' => '^1.13', 'drupal/linkit' => '^6.1']],
+            ['drupal/core' => '10.6.9', 'drupal/webform@drupal-module' => '6.2.9', 'drupal/token@drupal-module' => '1.13.0', 'drupal/linkit@drupal-module' => '6.1.7'],
+        );
+        mkdir($root . '/web/modules/custom/site', 0777, true);
+        file_put_contents($root . '/web/modules/custom/site/site.info.yml', "name: Site\ntype: module\ncore_version_requirement: ^10\n");
+        $project = new ComposerProject($root);
+        $linkit = (string) file_get_contents(__DIR__ . '/../../Fixtures/release-history-linkit.xml');
+        $http = new MockHttpClient(static fn (string $method, string $url): MockResponse => str_contains($url, '/linkit/')
+            ? new MockResponse($linkit)
+            : new MockResponse('', ['http_code' => 404]));
+        $planner = new Planner(
+            new Config(Config::defaults()),
+            $project,
+            new MajorPlanner($project, new ReleaseHistoryClient($root . '/.cache', 3600, $http)),
+        );
+
+        $base = self::scan();
+        $scan = new ScanResult('acme', $root, $base->scannedAt, $base->core, [
+            ...$base->packages,
+            new PackageStatus('drupal/linkit', 'drupal-module', true, false, '6.1.7', null, null),
+        ], customModules: ['site' => $root . '/web/modules/custom/site']);
+
+        $plan = $planner->build($scan, new PlanOptions(Step::SCOPE_MAJOR, target: '11.2.5'));
+
+        self::assertSame(
+            ['readiness', 'core', 'major-core', 'package:drupal/webform', 'package:drupal/token', 'rector', 'info-files'],
+            array_map(static fn (Step $s) => $s->id, $plan->steps),
+        );
+        self::assertSame(['drupal/linkit' => '^7.0.2'], $plan->step('major-core')?->companions);
     }
 
     public function testSecurityScopeTargetsSafestReleasesCoreFirst(): void

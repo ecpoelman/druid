@@ -67,6 +67,49 @@ final class CommandBuilder
     }
 
     /**
+     * One Composer resolve for several contrib steps: constraints that don't allow their target are
+     * raised first (`require --no-update`, per section), then every package moves in a single
+     * `update pkg:target ... -w`.
+     *
+     * @param list<Step> $steps contrib steps for installed packages
+     */
+    public function batch(array $steps): Attempt
+    {
+        $sections = ['require' => [], 'require-dev' => []];
+        $update = ['update'];
+        foreach ($steps as $step) {
+            $package = (string) $step->package;
+            $target = (string) $step->to;
+            $update[] = "{$package}:{$target}";
+            $constraint = $this->project->constraint($package);
+            if ($constraint === null) {
+                continue;
+            }
+            $value = match (true) {
+                ComposerProject::isExactVersionConstraint($constraint) => $target,
+                !VersionResolver::constraintAllows($constraint, $target) => $this->project->constraintFor($package, $target),
+                default => null,
+            };
+            if ($value !== null) {
+                $sections[$this->project->isDevRequirement($package) ? 'require-dev' : 'require'][] = "{$package}:{$value}";
+            }
+        }
+
+        $prerequisites = [];
+        if ($sections['require'] !== []) {
+            $prerequisites[] = new Attempt('batch', 'Raise constraints', array_merge(['require'], $sections['require'], ['--no-update']));
+        }
+        if ($sections['require-dev'] !== []) {
+            $prerequisites[] = new Attempt('batch', 'Raise dev constraints', array_merge(['require', '--dev'], $sections['require-dev'], ['--no-update']));
+        }
+        $update[] = '--with-dependencies';
+        if ($this->minimalChanges) {
+            $update[] = '--minimal-changes';
+        }
+        return new Attempt('batch', sprintf('Update %d packages in one Composer run', count($steps)), $update, [], $prerequisites);
+    }
+
+    /**
      * Raises the composer.json constraint explicitly. Null for transitive packages (no new root requirements).
      */
     public function requireBump(Step $step): ?Attempt

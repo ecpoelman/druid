@@ -110,10 +110,17 @@ final class ComposerRunner
      */
     public function audit(): array
     {
-        $data = $this->json(['audit', '--format=json', '--locked'])
+        return self::auditMap($this->json(['audit', '--format=json', '--locked'])
             ?? $this->json(['audit', '--format=json'])
-            ?? [];
+            ?? []);
+    }
 
+    /**
+     * @param array<mixed> $data
+     * @return array{advisories: array<string, list<array<string, mixed>>>, abandoned: array<string, string|null>}
+     */
+    private static function auditMap(array $data): array
+    {
         $advisories = [];
         foreach ((array) ($data['advisories'] ?? []) as $package => $items) {
             // Composer emits a list per package, or an id-keyed object in some versions.
@@ -134,12 +141,54 @@ final class ComposerRunner
      */
     public function outdated(bool $minorOnly = false): array
     {
-        $args = ['outdated', '--direct', '--format=json'];
-        if ($minorOnly) {
-            $args[] = '--minor-only';
-        }
-        $data = $this->json(array_merge($args, ['--locked'])) ?? $this->json($args) ?? [];
+        $args = self::outdatedArgs($minorOnly);
+        return self::outdatedMap($this->json(array_merge($args, ['--locked'])) ?? $this->json($args) ?? []);
+    }
 
+    /**
+     * `composer audit` and both `composer outdated` queries at once. Each one spends most of its time
+     * fetching repository metadata, so running them side by side saves most of the wait on large projects.
+     *
+     * @return array{audit: array{advisories: array<string, list<array<string, mixed>>>, abandoned: array<string, string|null>}, outdated: array<string, array{version: string, latest: string, status: string}>, minor: array<string, array{version: string, latest: string, status: string}>}
+     */
+    public function scanQueries(): array
+    {
+        $queries = [
+            'audit' => ['audit', '--format=json', '--locked'],
+            'outdated' => array_merge(self::outdatedArgs(false), ['--locked']),
+            'minor' => array_merge(self::outdatedArgs(true), ['--locked']),
+        ];
+        $jobs = [];
+        foreach ($queries as $key => $args) {
+            $line = $this->commandLine($args);
+            $jobs[$key] = ['command' => $line->command, 'cwd' => $this->root, 'env' => $line->env, 'timeout' => 300.0];
+        }
+        $results = $this->runner->runParallel($jobs);
+
+        $audit = self::decodeJson($results['audit']->output);
+        $outdated = self::decodeJson($results['outdated']->output);
+        $minor = self::decodeJson($results['minor']->output);
+        return [
+            'audit' => $audit !== null ? self::auditMap($audit) : $this->audit(),
+            'outdated' => $outdated !== null ? self::outdatedMap($outdated) : $this->outdated(),
+            'minor' => $minor !== null ? self::outdatedMap($minor) : $this->outdated(true),
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function outdatedArgs(bool $minorOnly): array
+    {
+        return array_merge(['outdated', '--direct', '--format=json'], $minorOnly ? ['--minor-only'] : []);
+    }
+
+    /**
+     * @param array<mixed> $data
+     * @return array<string, array{version: string, latest: string, status: string}>
+     */
+    private static function outdatedMap(array $data): array
+    {
         $map = [];
         foreach ((array) ($data['installed'] ?? $data['locked'] ?? []) as $item) {
             if (!is_array($item) || !isset($item['name'])) {

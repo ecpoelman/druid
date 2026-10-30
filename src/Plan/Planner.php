@@ -77,7 +77,9 @@ final class Planner
 
         if ($options->includesMajor() && $wantsCore && $this->majorPlanner !== null) {
             $major = $this->majorPlanner->plan($scan, $options, $steps);
-            $steps = array_merge($steps, $major['steps']);
+            if ($major['target'] !== null) {
+                $steps = $major['steps'];
+            }
             $notes = array_merge($notes, $major['notes']);
             $targetCore = $major['target'];
         }

@@ -50,9 +50,14 @@ final class Scanner
         $installed = array_map(static fn (array $p): string => $p['version'], $lock);
         $coreVersion = $project->installedCoreVersion() ?? '?';
 
-        $progress('Checking security advisories (composer audit' . ($context->drush !== null && $config->bool('scan.drush_security', true) ? ' + drush pm:security' : '') . ')');
+        $progress('Asking Composer for advisories and newer releases (composer audit + outdated, in parallel)');
+        $queries = $context->composer->scanQueries();
+        $outdated = $queries['outdated'];
+        $outdatedMinor = $queries['minor'];
+
+        $progress('Checking security advisories' . ($context->drush !== null && $config->bool('scan.drush_security', true) ? ' (drush pm:security)' : ''));
         $collector = new AdvisoryCollector($context->composer, $config->bool('scan.drush_security', true) ? $context->drush : null);
-        $advisories = $collector->collect($installed);
+        $advisories = $collector->collect($installed, $queries['audit']);
         $abandoned = $collector->abandoned();
 
         $coreAdvisories = [];
@@ -66,10 +71,6 @@ final class Scanner
                 unset($advisories[$package]);
             }
         }
-
-        $progress('Looking for newer releases (composer outdated)');
-        $outdated = $context->composer->outdated();
-        $outdatedMinor = $context->composer->outdated(true);
 
         $histories = [];
         if ($config->bool('scan.release_history', true)) {

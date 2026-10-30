@@ -48,6 +48,45 @@ class ProcessRunner
     }
 
     /**
+     * Runs read-only commands concurrently and waits for all of them.
+     *
+     * @param array<string, array{command: list<string>, cwd?: ?string, env?: array<string, string>, timeout?: ?float}> $jobs
+     * @return array<string, ProcessResult> keyed like `$jobs`
+     */
+    public function runParallel(array $jobs): array
+    {
+        $processes = [];
+        $results = [];
+        foreach ($jobs as $key => $job) {
+            $command = $job['command'];
+            $command[0] = $this->resolveExecutable($command[0]) ?? $command[0];
+            $env = $job['env'] ?? [];
+            $process = new Process($command, $job['cwd'] ?? null, $this->environment($env), null, $job['timeout'] ?? 900.0);
+            try {
+                $process->start();
+                $processes[$key] = [$process, CommandLine::format($command, $env)];
+            } catch (\Throwable $e) {
+                $results[$key] = new ProcessResult(CommandLine::format($command, $env), 127, '', $e->getMessage());
+            }
+        }
+        foreach ($processes as $key => [$process, $display]) {
+            try {
+                $process->wait();
+                $results[$key] = new ProcessResult($display, $process->getExitCode() ?? 1, $process->getOutput(), $process->getErrorOutput());
+            } catch (ProcessTimedOutException) {
+                $results[$key] = new ProcessResult($display, 124, $process->getOutput(), $process->getErrorOutput() . "\nTimed out.");
+            } catch (\Throwable $e) {
+                $results[$key] = new ProcessResult($display, 127, '', $e->getMessage());
+            }
+        }
+        $ordered = [];
+        foreach (array_keys($jobs) as $key) {
+            $ordered[$key] = $results[$key];
+        }
+        return $ordered;
+    }
+
+    /**
      * Full path to an executable, or null when it can't be found.
      */
     public function resolveExecutable(string $name): ?string

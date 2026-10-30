@@ -22,7 +22,7 @@ final class Verifier
     /**
      * @param bool $drupalBoots whether Drush could bootstrap Drupal before the run started
      */
-    public function verify(bool $drupalBoots, bool $updateDatabaseFirst = false): VerificationResult
+    public function verify(bool $drupalBoots): VerificationResult
     {
         $validate = $this->composer->validate();
         $text = strtolower($validate->combined());
@@ -32,20 +32,6 @@ final class Verifier
 
         if (!$this->checkDrupal || $this->drush === null || !$drupalBoots) {
             return VerificationResult::passed();
-        }
-
-        if ($updateDatabaseFirst) {
-            // A new core major can't rebuild its router or caches until its schema updates have run.
-            $updb = $this->drush->updateDatabase();
-            $rebuild = $this->drush->cacheRebuild();
-            if ($updb->successful() && $rebuild->successful()) {
-                return VerificationResult::passed(['Ran drush updatedb and cache:rebuild.']);
-            }
-            return VerificationResult::passed(array_values(array_filter([
-                $updb->successful() ? null : 'drush updatedb failed: ' . FailureAnalyzer::summary($updb->combined()),
-                $rebuild->successful() ? null : 'drush cache:rebuild failed: ' . FailureAnalyzer::summary($rebuild->combined()),
-                'Code was kept because database updates may have run. Check the site, or restore the database dump.',
-            ])));
         }
 
         $rebuild = $this->drush->cacheRebuild();

@@ -162,6 +162,51 @@ OUT;
         self::assertSame('6.2.9', (new ComposerProject($this->root))->lockedVersion('drupal/webform'));
     }
 
+    public function testContribStepsMoveTogetherInOneComposerRun(): void
+    {
+        $this->runner->on(function (array $c): ?\Druid\Environment\ProcessResult {
+            if (($c[1] ?? '') === 'update') {
+                $this->lockVersion('drupal/webform', '6.2.12');
+                $this->lockVersion('drupal/pathauto', '1.13.0');
+                return ScriptedProcessRunner::ok();
+            }
+            return null;
+        });
+        $pathauto = new Step('package:drupal/pathauto', Step::MODULE, Step::SCOPE_MINOR, 'pathauto', 'drupal/pathauto', '1.12.0', '1.13.0');
+
+        $result = $this->runPlan(new UpgradePlan('acme', Step::SCOPE_MINOR, [self::webform(Step::SCOPE_MINOR), $pathauto]));
+
+        $updates = array_values(array_filter($this->runner->calls, static fn ($call) => ($call['command'][1] ?? '') === 'update'));
+        self::assertCount(1, $updates);
+        self::assertContains('drupal/webform:6.2.12', $updates[0]['command']);
+        self::assertContains('drupal/pathauto:1.13.0', $updates[0]['command']);
+        self::assertSame(['batch', 'batch'], array_map(static fn (StepResult $r) => $r->strategy, $result->steps));
+        self::assertSame(0, $result->exitCode());
+    }
+
+    public function testFailedBatchFallsBackToOneStepAtATime(): void
+    {
+        $this->runner->on(function (array $c): ?\Druid\Environment\ProcessResult {
+            if (($c[1] ?? '') !== 'update') {
+                return null;
+            }
+            if (in_array('drupal/webform:6.2.12', $c, true) && in_array('drupal/pathauto:1.13.0', $c, true)) {
+                return ScriptedProcessRunner::fail('composer', self::CONFLICT, 2);
+            }
+            $this->lockVersion('drupal/webform', '6.2.12');
+            $this->lockVersion('drupal/pathauto', '1.13.0');
+            return ScriptedProcessRunner::ok();
+        });
+        $pathauto = new Step('package:drupal/pathauto', Step::MODULE, Step::SCOPE_MINOR, 'pathauto', 'drupal/pathauto', '1.12.0', '1.13.0');
+
+        $result = $this->runPlan(new UpgradePlan('acme', Step::SCOPE_MINOR, [self::webform(Step::SCOPE_MINOR), $pathauto]));
+
+        self::assertSame(['batch', 'isolated'], $this->listener->strategies);
+        self::assertSame(StepResult::UPGRADED, $result->steps[0]->status);
+        self::assertSame('isolated', $result->steps[0]->strategy);
+        self::assertSame(StepResult::SATISFIED, $result->steps[1]->status, 'the first isolated update moved both');
+    }
+
     public function testTrustedPluginIsAllowedAndTheCommandRetried(): void
     {
         $allowed = false;
