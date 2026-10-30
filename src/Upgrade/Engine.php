@@ -38,6 +38,9 @@ final class Engine
 
     /** Set once core moves to a new major: Drupal can't boot until contrib and custom code follow. */
     private bool $drupalChecksDeferred = false;
+
+    /** The new-major core step failed: contrib that needs it can't succeed this run. */
+    private bool $majorCoreDeferred = false;
     private readonly FailureAnalyzer $analyzer;
     private readonly Verifier $verifier;
 
@@ -110,6 +113,7 @@ final class Engine
         $stepResult = $this->safeRunStep($step, $options, $coreLater);
         if ($majorCore && $stepResult->status !== StepResult::UPGRADED) {
             $this->drupalChecksDeferred = false;
+            $this->majorCoreDeferred = true;
         } elseif ($majorCore && $this->drupalBoots) {
             $this->listener->notice('info', 'Drupal checks (drush updatedb, cache:rebuild) wait until contrib and custom code are on the new major - they run at the end.');
         }
@@ -176,7 +180,8 @@ final class Engine
         }
 
         if (!$outcome['ok']) {
-            if ($splits < self::MAX_BATCH_SPLITS && count($pending) >= 2 * self::MIN_BATCH) {
+            $coreBound = $this->majorCoreDeferred && $outcome['diagnosis']?->kind === Diagnosis::NEEDS_NEWER_CORE;
+            if (!$coreBound && $splits < self::MAX_BATCH_SPLITS && count($pending) >= 2 * self::MIN_BATCH) {
                 $this->listener->notice('info', 'The combined run failed - trying each half on its own.');
                 $half = intdiv(count($pending), 2);
                 $results += $this->runBatch(array_slice($pending, 0, $half, true), $plan, $options, $splits + 1);
@@ -400,6 +405,10 @@ final class Engine
                     }
                     if ($coreLater && $diagnosis->kind === Diagnosis::NEEDS_NEWER_CORE && !$step->isCore()) {
                         $this->listener->notice('info', 'Needs a newer core - deferred until the core step later in this run, then retried.');
+                        break 3;
+                    }
+                    if ($this->majorCoreDeferred && $diagnosis->kind === Diagnosis::NEEDS_NEWER_CORE && !$step->isCore()) {
+                        $this->listener->notice('info', 'Needs the new core major, whose step was deferred - skipped.');
                         break 3;
                     }
                     $unfixable = $diagnosis->kind === Diagnosis::SPAWN_FAILED

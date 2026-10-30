@@ -17,6 +17,9 @@ class ProcessRunner
     /** @var array<string, string|null> */
     private array $resolved = [];
 
+    /** Wrapper directory once prepared; '' when unavailable. */
+    private static ?string $shims = null;
+
     /**
      * @param list<string> $command
      * @param array<string, string> $env
@@ -30,7 +33,7 @@ class ProcessRunner
 
         $command[0] = $this->resolveExecutable($command[0]) ?? $command[0];
         $display = CommandLine::format($command, $env);
-        $process = new Process($command, $cwd, $this->environment($env), null, $timeout);
+        $process = new Process($this->detached($command), $cwd, $this->environment($env), null, $timeout);
 
         try {
             $process->run(static function (string $type, string $buffer) use ($onOutput): void {
@@ -61,7 +64,7 @@ class ProcessRunner
             $command = $job['command'];
             $command[0] = $this->resolveExecutable($command[0]) ?? $command[0];
             $env = $job['env'] ?? [];
-            $process = new Process($command, $job['cwd'] ?? null, $this->environment($env), null, $job['timeout'] ?? 900.0);
+            $process = new Process($this->detached($command), $job['cwd'] ?? null, $this->environment($env), null, $job['timeout'] ?? 900.0);
             try {
                 $process->start();
                 $processes[$key] = [$process, CommandLine::format($command, $env)];
@@ -146,6 +149,60 @@ class ProcessRunner
      */
     private function environment(array $extra): array
     {
-        return ['PATH' => implode(PATH_SEPARATOR, self::pathDirectories())] + $extra;
+        $dirs = self::pathDirectories();
+        $shims = $this->shimDirectory();
+        if ($shims !== null) {
+            array_unshift($dirs, $shims);
+        }
+        return ['PATH' => implode(PATH_SEPARATOR, $dirs)] + $extra;
+    }
+
+    /**
+     * Runs the command in its own session, without a controlling terminal. Tools that ask questions on
+     * /dev/tty (patch, git credential prompts) then fail instead of waiting for an answer nobody sees.
+     *
+     * @param list<string> $command
+     * @return list<string>
+     */
+    private function detached(array $command): array
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            return $command;
+        }
+        $perl = $this->resolveExecutable('perl');
+        if ($perl === null) {
+            return $command;
+        }
+        return [$perl, '-MPOSIX', '-e', 'POSIX::setsid(); exec { $ARGV[0] } @ARGV; print STDERR "$ARGV[0]: $!\n"; exit 127', '--', ...$command];
+    }
+
+    /**
+     * Directory with a `patch` wrapper that adds --forward. Without a terminal, patch answers its
+     * "previously applied patch - assume -R?" question with yes and silently reverts the fix
+     * (composer-patches can't pass flags). With --forward it skips the patch and reports a failure.
+     */
+    private function shimDirectory(): ?string
+    {
+        if (self::$shims !== null) {
+            return self::$shims === '' ? null : self::$shims;
+        }
+        self::$shims = '';
+        $patch = PHP_OS_FAMILY === 'Windows' ? null : $this->resolveExecutable('patch');
+        if ($patch === null) {
+            return null;
+        }
+        $dir = sys_get_temp_dir() . '/druid-shims-' . (function_exists('posix_getuid') ? posix_getuid() : get_current_user());
+        $file = $dir . '/patch';
+        $script = "#!/bin/sh\n# druid: never reverse a patch that looks already applied.\nexec " . escapeshellarg($patch) . " --forward \"\$@\"\n";
+        if (!is_dir($dir) && !@mkdir($dir, 0700, true)) {
+            return null;
+        }
+        if (@file_get_contents($file) !== $script && @file_put_contents($file, $script) === false) {
+            return null;
+        }
+        if (!@chmod($file, 0755)) {
+            return null;
+        }
+        return self::$shims = $dir;
     }
 }
