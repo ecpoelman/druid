@@ -44,12 +44,18 @@ final class ReadinessHandler implements StepHandler
                 : 'upgrade_status is not installed - run `druid upgrade:check --install-upgrade-status` for a deprecation report.');
         }
 
-        $report = $this->upgradeStatus->analyze();
+        // Contrib is replaced by its new-major releases during the run, so only custom code is worth scanning.
+        if ($this->customExtensions === []) {
+            return new StepResult($step, StepResult::DONE, message: 'No custom modules or themes to check (`druid upgrade:check` reports on contrib).');
+        }
+        $names = array_keys($this->customExtensions);
+        $listener->notice('info', 'Checking custom code with upgrade_status: ' . implode(', ', $names));
+        $report = $this->upgradeStatus->analyze($names);
         if ($report === null) {
-            return new StepResult($step, StepResult::DONE, message: 'Readiness check could not run', warnings: ['upgrade_status analysis failed - check `drush upgrade_status:analyze --all` manually.']);
+            return new StepResult($step, StepResult::DONE, message: 'Readiness check could not run', warnings: ['upgrade_status analysis failed - check `drush upgrade_status:analyze ' . implode(' ', $names) . '` manually.']);
         }
         if (!$report->structured) {
-            return new StepResult($step, StepResult::DONE, message: 'upgrade_status analysis finished (see `drush upgrade_status:analyze --all` for details)');
+            return new StepResult($step, StepResult::DONE, message: 'upgrade_status analysis finished (see `drush upgrade_status:analyze ' . implode(' ', $names) . '` for details)');
         }
         if ($report->count() === 0) {
             return new StepResult($step, StepResult::DONE, message: 'upgrade_status found no deprecations');
