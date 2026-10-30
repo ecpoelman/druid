@@ -96,6 +96,23 @@ final class MajorCompatibilityTest extends TestCase
         self::assertNull(MajorPlanner::infoFilesStep($custom, $root, '10.6.18', '11.4.9', Step::SCOPE_MAJOR));
     }
 
+    public function testInfoFilesIncludeSubModulesButNotTestFixtures(): void
+    {
+        $root = TempProject::create(['name' => 'acme/site']);
+        $base = $root . '/web/modules/custom/suite';
+        foreach (['', '/modules/suite_hero', '/modules/suite_hero/config/optional', '/tests/modules/suite_test'] as $dir) {
+            mkdir($base . $dir, 0777, true);
+        }
+        file_put_contents($base . '/modules/suite_hero/config/optional/core.base_field_override.block_content.hero.info.yml', "id: block_content.hero.info\n");
+        file_put_contents($base . '/suite.info.yml', "name: Suite\ncore_version_requirement: ^10 || ^11\n");
+        file_put_contents($base . '/modules/suite_hero/suite_hero.info.yml', "name: 'Block: Hero'\ncore_version_requirement: ^9 || ^10\n");
+        file_put_contents($base . '/tests/modules/suite_test/suite_test.info.yml', "name: Test\ncore_version_requirement: ^10\n");
+
+        $step = MajorPlanner::infoFilesStep(['suite' => $base], $root, '10.6.20', '11.4.11', Step::SCOPE_MAJOR);
+
+        self::assertSame(['web/modules/custom/suite/modules/suite_hero/suite_hero.info.yml'], $step?->packages);
+    }
+
     public function testRectorSkipsBundledThirdPartyCode(): void
     {
         $root = TempProject::create(['name' => 'acme/site']);

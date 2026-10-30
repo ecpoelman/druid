@@ -336,12 +336,13 @@ final class MajorPlanner
         $files = [];
         $names = [];
         foreach ($customModules as $name => $directory) {
-            $file = InfoFile::forExtension($name, $directory);
-            if ($file === null || InfoFile::supports($file, $target)) {
-                continue;
+            foreach (InfoFile::withinExtension($name, $directory) as $file) {
+                if (InfoFile::supports($file, $target)) {
+                    continue;
+                }
+                $files[] = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
+                $names[] = basename($file, '.info.yml');
             }
-            $files[] = str_starts_with($file, $root) ? substr($file, strlen($root)) : $file;
-            $names[] = $name;
         }
         if ($files === []) {
             return null;

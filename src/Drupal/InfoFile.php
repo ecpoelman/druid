@@ -22,6 +22,37 @@ final class InfoFile
         return is_file($file) ? $file : null;
     }
 
+    /**
+     * The extension's .info.yml plus those of sub-modules and sub-themes inside it
+     * (bundled third-party code and test fixtures are skipped).
+     *
+     * @return list<string>
+     */
+    public static function withinExtension(string $name, string $directory): array
+    {
+        $files = [];
+        $main = self::forExtension($name, $directory);
+        if ($main !== null) {
+            $files[] = $main;
+        }
+        if (!is_dir($directory)) {
+            return $files;
+        }
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveCallbackFilterIterator(
+            new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS),
+            static fn (\SplFileInfo $file): bool => !$file->isDir() || !in_array($file->getFilename(), ['vendor', 'node_modules', 'tests', 'config', '.git'], true),
+        ));
+        $nested = [];
+        foreach ($iterator as $file) {
+            // Machine names have no dots; config such as core.base_field_override.*.info.yml is not an extension.
+            if ($file instanceof \SplFileInfo && $file->isFile() && preg_match('/^[a-z0-9_]+\.info\.yml$/', $file->getFilename()) === 1 && $file->getPathname() !== $main) {
+                $nested[] = $file->getPathname();
+            }
+        }
+        sort($nested);
+        return array_merge($files, $nested);
+    }
+
     public static function requirement(string $file): ?string
     {
         $contents = @file_get_contents($file);
